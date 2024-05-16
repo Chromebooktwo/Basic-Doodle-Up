@@ -1,449 +1,332 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Basic Doodle Jump HTML Game</title>
+  <title>Doodle Up: Double Digits</title>
   <meta charset="UTF-8">
   <style>
     html, body {
       height: 100%;
       margin: 0;
     }
-
     body {
       display: flex;
       align-items: center;
       justify-content: center;
-      flex-direction: column; /* Align content vertically */
+      flex-direction: column;
     }
-
     canvas {
       border: 1px solid black;
     }
-
-    #gameContainer {
-      position: relative;
-    }
-
-    #startButton {
-      position: absolute;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-    }
-
-    #killScreen {
+    .overlay {
       display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background-color: rgba(0, 0, 0, 0.5);
+      z-index: 1;
+    }
+    .death-screen {
       position: absolute;
       top: 50%;
       left: 50%;
       transform: translate(-50%, -50%);
-      background-color: rgba(255, 255, 255, 0.8);
-      padding: 20px;
-      border: 2px solid black;
       text-align: center;
+      color: white;
     }
-
-    #resetButton {
-      margin-top: 20px; /* Add some space between the Play Again button and other elements */
+    /* Added styles for the start game button */
+    #startButton {
+      margin-top: 20px;
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
     }
   </style>
 </head>
 <body>
-  <div id="gameContainer">
-    <button id="startButton">Start Game</button> <!-- Start Game button -->
-    <canvas width="375" height="667" id="game"></canvas>
+<canvas width="375" height="667" id="game"></canvas>
+<div class="overlay" id="overlay">
+  <div class="death-screen">
+    <h1>Game Over!</h1>
+    <p>Your Score: <span id="finalScore"></span></p>
+    <p>High Score: <span id="finalHighScore"></span></p>
+    <button onclick="resetGame()">Play Again</button>
   </div>
-  <div id="killScreen">
-    <h2>Game Over</h2>
-    <p>Your Score: <span id="playerScore"></span></p>
-    <p>High Score: <span id="highScore"></span></p>
-    <p>Enemies Killed: <span id="enemiesKilled"></span></p>
-    <button id="resetButton" onclick="resetGame()">Play Again</button>
-  </div>
-  <script>
-    const canvas = document.getElementById('game');
-    const context = canvas.getContext('2d');
+</div>
+<!-- Start Game Button -->
+<button id="startButton" onclick="startGame()">Start Game</button>
+<p id="score" style="position: absolute; top: 10px; left: 10px; font-size: 24px;"></p>
+<p id="highScore" style="position: absolute; top: 10px; right: 10px; font-size: 24px;"></p>
+<script>
+  const canvas = document.getElementById('game');
+  const context = canvas.getContext('2d');
+  let score = 0;
+  let highScore = localStorage.getItem('highScore') || 0;
+  let doodle = {
+    x: canvas.width / 2,
+    y: canvas.height - 30,
+    width: 20,
+    height: 20,
+    dx: 0,
+    dy: 0,
+    isJumping: false
+  };
+  let platforms = [];
+  let obstacles = [];
+  let gameOver = false;
+  let falling = false; // Variable to track if the player is falling
+  let fallDuration = 0; // Variable to track how long the player has been falling
+  const fallThreshold = 30; // Time threshold for falling before game over, in frames
+  const platformSpeed = 2; // Speed of normal platforms
+  const yellowPlatformSpeed = 1; // Speed of yellow platforms
+  const yellowPlatformTimerDecrease = 2; // Amount to decrease the timer per frame when standing on a yellow platform
 
-    const platformWidth = 65;
+  // Function to generate platforms
+  function generatePlatforms() {
+    // Randomly determine if the platform will be a regular or falling platform
+    const isFalling = Math.random() < 0.2; // 20% chance of being a falling platform
+    const platformWidth = 300;
     const platformHeight = 20;
-    const platformStart = canvas.height - 50;
+    const isYellow = Math.random() < 0.3; // 30% chance of being a yellow platform
+    const yellowDuration = Math.floor(Math.random() * (300 - 180 + 1) + 180); // Random duration between 3 and 5 seconds
+    platforms.push({
+      x: Math.random() * (canvas.width - platformWidth), // Ensure platforms are generated within canvas width
+      y: canvas.height + 50,
+      width: platformWidth,
+      height: platformHeight,
+      isFalling: isFalling,
+      isYellow: isYellow,
+      yellowDuration: yellowDuration,
+      yellowTimer: yellowDuration // Initialize yellow timer
+    });
+  }
 
-    const gravity = 0.33;
-    const drag = 0.3;
-    const bounceVelocity = -12.5;
+  // Function to generate obstacles
+  function generateObstacles() {
+    obstacles.push({
+      x: Math.random() * canvas.width,
+      y: 0,
+      width: 20,
+      height: 20
+    });
+  }
 
-    let minPlatformSpace = 15;
-    let maxPlatformSpace = 20;
+  // Function to draw the doodle
+  function drawDoodle() {
+    context.fillStyle = 'blue';
+    context.fillRect(doodle.x, doodle.y, doodle.width, doodle.height);
+  }
 
-    let platforms = [{
-      x: canvas.width / 2 - platformWidth / 2,
-      y: platformStart
-    }];
-
-    const doodle = {
-      width: 40,
-      height: 60,
-      x: canvas.width / 2 - 20,
-      y: platformStart - 60,
-      dx: 0,
-      dy: 0
-    };
-
-    class Enemy {
-      constructor(x, y) {
-        this.width = 30;
-        this.height = 30;
-        this.x = x;
-        this.y = y;
-        this.dx = 2;
-      }
-
-      update() {
-        this.x += this.dx;
-        if (this.x + this.width > canvas.width || this.x < 0) {
-          this.dx *= -1;
-        }
-      }
-
-      draw() {
-        context.fillStyle = 'red';
-        context.fillRect(this.x, this.y, this.width, this.height);
-      }
-    }
-
-    class BrokenPlatform {
-      constructor(x, y) {
-        this.x = x;
-        this.y = y;
-        this.width = platformWidth;
-        this.height = platformHeight;
-        this.jumpCount = 0;
-        this.maxJumps = Math.floor(Math.random() * 3) + 1;
-      }
-
-      draw() {
-        context.fillStyle = 'orange';
-        context.fillRect(this.x, this.y, this.width, this.height);
+  // Function to draw platforms
+  function drawPlatforms() {
+    platforms.forEach(platform => {
+      if (platform.isYellow) {
+        context.fillStyle = 'yellow'; // Yellow color for yellow platform
+        context.fillRect(platform.x, platform.y, platform.width, platform.height);
         context.fillStyle = 'black';
-        context.font = '16px Arial';
-        context.fillText(this.maxJumps - this.jumpCount, this.x + this.width / 2 - 5, this.y + this.height / 2 + 5);
-      }
-    }
-
-    class MovingPlatform {
-      constructor(x, y) {
-        this.x = x;
-        this.y = y;
-        this.width = platformWidth;
-        this.height = platformHeight;
-        this.dx = 2;
-        this.direction = 1;
-      }
-
-      update() {
-        this.x += this.dx * this.direction;
-        if (this.x + this.width > canvas.width || this.x < 0) {
-          this.direction *= -1;
-        }
-      }
-
-      draw() {
-        context.fillStyle = 'lightblue';
-        context.fillRect(this.x, this.y, this.width, this.height);
-      }
-    }
-
-    class Projectile {
-      constructor(x, y, dx, dy) {
-        this.width = 10;
-        this.height = 10;
-        this.x = x;
-        this.y = y;
-        this.dx = dx;
-        this.dy = dy;
-      }
-
-      update() {
-        this.x += this.dx;
-        this.y += this.dy;
-      }
-
-      draw() {
-        context.fillStyle = 'blue';
-        context.fillRect(this.x, this.y, this.width, this.height);
-      }
-    }
-
-    let enemies = [];
-    let movingPlatforms = [];
-    let projectiles = [];
-
-    let playerDir = 0;
-    let keydown = false;
-    let prevDoodleY = doodle.y;
-
-    let score = 0;
-    let highScore = 0;
-    let highestPoint = doodle.y;
-    let enemiesKilled = 0; // Track the number of enemies killed
-
-    let isGameOver = false;
-
-    function loop() {
-      if (isGameOver) return;
-
-      requestAnimationFrame(loop);
-      context.clearRect(0, 0, canvas.width, canvas.height);
-
-      doodle.dy += gravity;
-
-      if (doodle.y < canvas.height / 2 && doodle.dy < 0) {
-        platforms.forEach(function(platform) {
-          platform.y += -doodle.dy;
-        });
-
-        movingPlatforms.forEach(function(platform) {
-          platform.update();
-        });
-
-        enemies.forEach(function(enemy) {
-          enemy.y += -doodle.dy;
-        });
-
-        projectiles.forEach(function(projectile) {
-          projectile.y += -doodle.dy;
-        });
-
-        while (platforms[platforms.length - 1].y > 0) {
-          const isBroken = Math.random() < 0.2;
-          const isNewMovingPlatform = Math.random() < 0.1;
-          let newPlatform;
-
-          if (isNewMovingPlatform) {
-            newPlatform = new MovingPlatform(random(25, canvas.width - 25 - platformWidth), platforms[platforms.length - 1].y - (platformHeight + random(minPlatformSpace, maxPlatformSpace)));
-            movingPlatforms.push(newPlatform);
-          } else {
-            newPlatform = isBroken ? new BrokenPlatform(random(25, canvas.width - 25 - platformWidth), platforms[platforms.length - 1].y - (platformHeight + random(minPlatformSpace, maxPlatformSpace)))
-                                    : { x: random(25, canvas.width - 25 - platformWidth), y: platforms[platforms.length - 1].y - (platformHeight + random(minPlatformSpace, maxPlatformSpace)) };
-          }
-
-          platforms.push(newPlatform);
-
-          if (!isBroken && !isNewMovingPlatform && Math.random() < 0.2) {
-            enemies.push(new Enemy(newPlatform.x + platformWidth / 2 - 15, newPlatform.y - 30));
-          }
-
-          minPlatformSpace += 0.5;
-          maxPlatformSpace += 0.5;
-          maxPlatformSpace = Math.min(maxPlatformSpace, canvas.height / 2);
-        }
+        context.fillText(Math.ceil(platform.yellowTimer / 60), platform.x + platform.width / 2, platform.y + platform.height / 2);
       } else {
-        doodle.y += doodle.dy;
+        context.fillStyle = platform.isFalling ? 'purple' : 'brown'; // Different color for falling platforms
+        context.fillRect(platform.x, platform.y, platform.width, platform.height);
       }
+    });
+  }
 
-      if (!keydown) {
-        if (playerDir < 0) {
-          doodle.dx += drag;
-          if (doodle.dx > 0) {
-            doodle.dx = 0;
-            playerDir = 0;
+  // Function to draw obstacles
+  function drawObstacles() {
+    context.fillStyle = 'red';
+    obstacles.forEach(obstacle => {
+      context.fillRect(obstacle.x, obstacle.y, obstacle.width, obstacle.height);
+    });
+  }
+
+  // Function for collision detection between doodle and platforms
+  function checkCollision() {
+    let onPlatform = false; // Variable to track if the player is on any platform
+    platforms.forEach(platform => {
+      if (
+        doodle.x < platform.x + platform.width &&
+        doodle.x + doodle.width > platform.x &&
+        doodle.y + doodle.height > platform.y &&
+        doodle.y + doodle.height < platform.y + platform.height
+      ) {
+        if (platform.isYellow) {
+          if (platform.yellowTimer <= 0) {
+            platforms.splice(platforms.indexOf(platform), 1); // Remove yellow platform when timer runs out
+          } else {
+            doodle.y = platform.y - doodle.height;
+            doodle.dy = -8;
+            doodle.isJumping = false;
+            onPlatform = true; // Set onPlatform to true if the player is on a platform
           }
-        } else if (playerDir > 0) {
-          doodle.dx  -= drag;
-          if (doodle.dx < 0) {
-            doodle.dx = 0;
-            playerDir = 0;
-          }
-        }
-      }
-
-      doodle.x += doodle.dx;
-
-      if (doodle.x + doodle.width < 0) {
-        doodle.x = canvas.width;
-      } else if (doodle.x > canvas.width) {
-        doodle.x = -doodle.width;
-      }
-
-      platforms.forEach(function(platform, index) {
-        if (platform instanceof BrokenPlatform) {
-          platform.draw();
         } else {
-          context.fillStyle = 'green';
-          context.fillRect(platform.x, platform.y, platformWidth, platformHeight);
-        }
-
-        if (
-          doodle.dy > 0 &&
-          prevDoodleY + doodle.height <= platform.y &&
-          doodle.x < platform.x + platformWidth &&
-          doodle.x + doodle.width > platform.x &&
-          doodle.y < platform.y + platformHeight &&
-          doodle.y + doodle.height > platform.y
-        ) {
           doodle.y = platform.y - doodle.height;
-          doodle.dy = bounceVelocity;
-
-          if (platform instanceof BrokenPlatform) {
-            platform.jumpCount++;
-            if (platform.jumpCount >= platform.maxJumps) {
-              platforms.splice(index, 1);
-            }
-          }
+          doodle.dy = -8;
+          doodle.isJumping = false;
+          onPlatform = true; // Set onPlatform to true if the player is on a platform
         }
-      });
-
-      movingPlatforms.forEach(function(platform) {
-        platform.draw();
-        if (
-          doodle.dy < 0 &&
-          doodle.y + doodle.height >= platform.y &&
-          doodle.x < platform.x + platformWidth &&
-          doodle.x + doodle.width > platform.x &&
-          doodle.y < platform.y + platformHeight &&
-          doodle.y + doodle.height > platform.y
-        ) {
-          doodle.y = platform.y - doodle.height;
-          doodle.dy = bounceVelocity;
-        }
-      });
-
-      projectiles.forEach(function(projectile, index) {
-        projectile.update();
-        projectile.draw();
-
-        enemies.forEach(function(enemy, enemyIndex) {
-          if (
-            projectile.x < enemy.x + enemy.width &&
-            projectile.x + projectile.width > enemy.x &&
-            projectile.y < enemy.y + enemy.height &&
-            projectile.y + projectile.height > enemy.y
-          ) {
-            enemies.splice(enemyIndex, 1); // Remove the enemy
-            projectiles.splice(index, 1); // Remove the projectile
-            enemiesKilled++; // Increment the number of enemies killed
-            score += 10; // Add 10 points for killing an enemy
-          }
-        });
-
-        if (projectile.y < 0 || projectile.y > canvas.height || projectile.x < 0 || projectile.x > canvas.width) {
-          projectiles.splice(index, 1); // Remove the projectile if it goes off-screen
-        }
-      });
-
-      enemies.forEach(function(enemy) {
-        enemy.update();
-        enemy.draw();
-        if (
-          doodle.x < enemy.x + enemy.width &&
-          doodle.x + doodle.width > enemy.x &&
-          doodle.y < enemy.y + enemy.height &&
-          doodle.y + doodle.height > enemy.y
-        ) {
-          endGame();
-        }
-      });
-
-      context.fillStyle = 'yellow';
-      context.fillRect(doodle.x, doodle.y, doodle.width, doodle.height);
-
-      if (doodle.y < highestPoint) {
-        highestPoint = doodle.y;
-        score = Math.floor((canvas.height - highestPoint) / 10);
       }
+    });
 
-      highScore = Math.max(highScore, score);
+    // If the player falls off the platforms and doesn't land on a platform in time, set falling to true
+    if (!onPlatform && doodle.y > canvas.height) {
+      falling = true;
+    } else {
+      falling = false;
+      fallDuration = 0; // Reset fall duration if the player lands on a platform
+    }
 
-      context.fillStyle = 'black';
-      context.font = '20px Arial';
-      context.fillText('Score: ' + score, 10, 30);
-      context.fillText('High Score: ' + highScore, 10, 60);
-      context.fillText('Enemies Killed: ' + enemiesKilled, 10, 90); // Display enemies killed
+    obstacles.forEach(obstacle => {
+      if (
+        doodle.x < obstacle.x + obstacle.width &&
+        doodle.x + doodle.width > obstacle.x &&
+        doodle.y < obstacle.y + obstacle.height &&
+        doodle.y + doodle.height > obstacle.y
+      ) {
+        endGame();
+      }
+    });
 
-      prevDoodleY = doodle.y;
+    // Check collision with left and right walls
+    if (doodle.x < 0) {
+      doodle.x = 0;
+    } else if (doodle.x + doodle.width > canvas.width) {
+      doodle.x = canvas.width - doodle.width;
+    }
 
-      platforms = platforms.filter(function(platform) {
-        return platform.y < canvas.height;
-      });
+    // Check collision with top boundary
+    if (doodle.y < 0) {
+      doodle.y = canvas.height - 30; // Teleport the player down
+    }
+  }
 
-      enemies = enemies.filter(function(enemy) {
-        return enemy.y < canvas.height;
-      });
+  // Function to handle keyboard input
+  document.addEventListener('keydown', function(event) {
+    if (event.key === 'ArrowLeft') {
+      doodle.dx = -2;
+    } else if (event.key === 'ArrowRight') {
+      doodle.dx = 2;
+    } else if (event.key === 'ArrowUp' && !doodle.isJumping) {
+      doodle.isJumping = true;
+      doodle.dy = -8;
+    }
+  });
 
-      movingPlatforms = movingPlatforms.filter(function(platform) {
-        return platform.y < canvas.height;
-      });
+  document.addEventListener('keyup', function(event) {
+    if ((event.key === 'ArrowLeft' && doodle.dx === -2) || (event.key === 'ArrowRight' && doodle.dx === 2)) {
+      doodle.dx = 0;
+    }
+  });
 
-      if (doodle.y > canvas.height) {
+  // Function to start the game
+  function startGame() {
+    document.getElementById('startButton').style.display = 'none';
+    gameLoop();
+  }
+
+  // Main game loop
+  function gameLoop() {
+    context.clearRect(0, 0, canvas.width, canvas.height);
+
+    drawPlatforms(); // Draw the platforms
+    drawObstacles(); // Draw the obstacles
+    drawDoodle(); // Draw the doodle
+
+    platforms.forEach(platform => {
+      let speed = platform.isYellow ? yellowPlatformSpeed : platformSpeed;
+      platform.y -= platform.isFalling ? 6 : speed; // Move platforms upwards, faster for falling platforms
+      if (platform.y < 0) {
+        platforms.splice(platforms.indexOf(platform), 1); // Remove platforms that go off-screen
+      }
+      if (platform.isYellow && doodle.x >= platform.x && doodle.x <= platform.x + platform.width && doodle.y + doodle.height >= platform.y && doodle.y + doodle.height <= platform.y + platform.height) {
+        if (platform.yellowTimer <= 0) {
+          platforms.splice(platforms.indexOf(platform), 1); // Remove yellow platform when timer runs out
+        } else {
+          platform.yellowTimer -= yellowPlatformTimerDecrease;
+        }
+      }
+    });
+    if (platforms.length < 5) {
+      generatePlatforms(); // Generate new platforms
+    }
+
+    obstacles.forEach(obstacle => {
+      obstacle.y += 2; // Move obstacles downwards
+      if (obstacle.y > canvas.height) {
+        obstacles.splice(obstacles.indexOf(obstacle), 1); // Remove obstacles that go off-screen
+      }
+    });
+    if (obstacles.length < 3) {
+      generateObstacles(); // Generate new obstacles
+    }
+
+    doodle.x += doodle.dx; // Update doodle's horizontal position
+
+    checkCollision(); // Check for collision with platforms, obstacles, and boundaries
+
+    if (doodle.isJumping) {
+      doodle.y += doodle.dy;
+      doodle.dy += 0.2; // Apply adjusted gravity
+      if (doodle.y > canvas.height - 30) {
+        doodle.y = canvas.height - 30; // Prevent the doodle from falling through the floor
+        doodle.dy = 0;
+        doodle.isJumping = false;
+      }
+    } else {
+      doodle.y += 3; // Apply gravity when doodle is not jumping
+    }
+
+    // Update and display score based on doodle's ascent
+    if (doodle.dy < 0) {
+      score++;
+      document.getElementById('score').textContent = 'Score: ' + score;
+    }
+
+    // Update and display high score
+    if (score > highScore) {
+      highScore = score;
+      localStorage.setItem('highScore', highScore);
+    }
+    document.getElementById('highScore').textContent = 'High Score: ' + highScore;
+
+    // Check if the player is falling and below the canvas height
+    if (falling && doodle.y > canvas.height) {
+      fallDuration++;
+      if (fallDuration > fallThreshold) {
         endGame();
       }
     }
 
-    document.addEventListener('keydown', function(e) {
-      if (e.which === 37) {
-        keydown = true;
-        playerDir = -1;
-        doodle.dx = -3;
-      } else if (e.which === 39) {
-        keydown = true;
-        playerDir = 1;
-        doodle.dx = 3;
-      } else if (e.which === 32) { // Space key
-        shootProjectile();
-      }
-    });
-
-    document.addEventListener('keyup', function(e) {
-      keydown = false;
-    });
-
-    document.getElementById('startButton').addEventListener('click', startGame);
-
-    function startGame() {
-      isGameOver = false;
-      highestPoint = doodle.y; // Reset highest point at start
-      requestAnimationFrame(loop);
-      document.getElementById('startButton').style.display = 'none';
+    if (gameOver) {
+      document.getElementById('finalScore').textContent = score;
+      document.getElementById('finalHighScore').textContent = highScore;
+      document.getElementById('overlay').style.display = 'block';
+    } else {
+      requestAnimationFrame(gameLoop);
     }
+  }
 
-    function random(min, max) {
-      return Math.random() * (max - min) + min;
-    }
+  // Function to end the game
+  function endGame() {
+    gameOver = true;
+  }
 
-    function shootProjectile() {
-      const projectile = new Projectile(doodle.x + doodle.width / 2 - 5, doodle.y, 0, -5);
-      projectiles.push(projectile);
-    }
+  // Function to reset the game
+  function resetGame() {
+    score = 0;
+    doodle.x = canvas.width / 2;
+    doodle.y = canvas.height - 30;
+    platforms = [];
+    obstacles = [];
+    gameOver = false;
+    falling = false; // Reset the variable
+    fallDuration = 0; // Reset the fall duration
+    document.getElementById('overlay').style.display = 'none';
+    gameLoop();
+  }
 
-    function endGame() {
-      isGameOver = true;
-      document.getElementById('playerScore').textContent = score;
-      document.getElementById('highScore').textContent = highScore;
-      document.getElementById('enemiesKilled').textContent = enemiesKilled; // Display enemies killed
-      document.getElementById('killScreen').style.display = 'block';
-    }
-
-    function resetGame() {
-      platforms = [{
-        x: canvas.width / 2 - platformWidth / 2,
-        y: platformStart
-      }];
-      let spawnPlatformIndex = Math.floor(Math.random() * platforms.length);
-      doodle.x = platforms[spawnPlatformIndex].x + platformWidth / 2 - doodle.width / 2;
-      doodle.y = platforms[spawnPlatformIndex].y - doodle.height;
-      doodle.dy = 0;
-      score = 0;
-      highestPoint = doodle.y;
-      minPlatformSpace = 15;
-      maxPlatformSpace = 20;
-      enemies = [];
-      movingPlatforms = [];
-      projectiles = [];
-      enemiesKilled = 0; // Reset enemies killed
-      isGameOver = false;
-      requestAnimationFrame(loop);
-      document.getElementById('killScreen').style.display = 'none';
-    }
-  </script>
+</script>
 </body>
 </html>
