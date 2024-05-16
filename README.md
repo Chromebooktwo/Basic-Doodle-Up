@@ -1,4 +1,4 @@
-# Doodle-Jump-Basic
-My version of Doodle Jump, but basic downgraded version.
+# Doodle-Up-Basic
+A new game I created using chat GPT...
 This is also my first github project!
 
